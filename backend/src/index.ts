@@ -9,11 +9,13 @@ const app = express();
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000' }));
 app.use(express.json());
 
-app.get('/health', (_req, res) => {
+// Routes are mounted under /api because on Vercel this service sits behind
+// the "/api" route prefix, and requests arrive with that prefix included.
+app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.use('/applications', applicationRoutes);
+app.use('/api/applications', applicationRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

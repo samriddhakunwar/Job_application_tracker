@@ -1,14 +1,33 @@
 # Deployment Guide
 
-The app deploys as three pieces:
+This project deploys to **Vercel** as a single project with two services (the Next.js frontend and
+the Express backend), using Vercel's `experimentalServices` feature. The database stays on **Neon**.
 
 - **Database** – Neon (already provisioned)
-- **Backend** – Render (Express API)
-- **Frontend** – Vercel (Next.js)
+- **Frontend + Backend** – one Vercel project, two services (`vercel.json`)
+
+## How it's wired
+
+`vercel.json` at the repo root defines the two services:
+
+```json
+{
+  "experimentalServices": {
+    "frontend": { "entrypoint": "frontend", "routePrefix": "/", "framework": "nextjs" },
+    "backend":  { "entrypoint": "backend",  "routePrefix": "/api", "framework": "express" }
+  }
+}
+```
+
+- The frontend is served at `/`.
+- The backend is served at `/api`, so all API routes are mounted under `/api`
+  (`/api/health`, `/api/applications`, ...).
+- Both services share one domain, so the browser calls the API at a relative `/api` path — **no CORS
+  needed in production**.
+- Vercel automatically injects `NEXT_PUBLIC_BACKEND_URL=/api` into the frontend, which the API client
+  picks up. Locally you instead use `NEXT_PUBLIC_API_URL=http://localhost:4000/api`.
 
 ## 0. Push to GitHub
-
-Render and Vercel both deploy from a GitHub repo, so the project needs to be on GitHub first.
 
 ```bash
 git init
@@ -21,41 +40,50 @@ git push -u origin main
 
 The `.gitignore` files keep `node_modules`, build output, and `.env` (your secrets) out of the repo.
 
-## 1. Backend on Render
+## 1. Enable Services on the Vercel project
 
-There is a `render.yaml` blueprint at the repo root, so the easiest path is:
+`experimentalServices` is an experimental feature, so it has to be turned on:
 
-1. Go to https://render.com → **New** → **Blueprint** and pick your GitHub repo.
-2. Render reads `render.yaml` and creates the `job-tracker-backend` web service.
-3. When prompted, fill in the environment variables (they are marked `sync: false` so they are
-   never stored in git):
-   - `DATABASE_URL` – your Neon connection string (same one in `backend/.env`)
-   - `CLIENT_URL` – the Vercel URL from step 2, e.g. `https://your-app.vercel.app`
-     (you can set a placeholder now and update it after the frontend is deployed)
-4. Deploy. The build runs `prisma migrate deploy`, so the tables are created automatically.
+1. Go to https://vercel.com → **Add New** → **Project** and import the repo.
+2. In the project settings, set the **Framework** to **Services** (required for `experimentalServices`
+   to be picked up). If you don't see this option, the Services feature isn't enabled for your account
+   yet — see the fallback at the bottom of this file.
 
-Render gives you a URL like `https://job-tracker-backend.onrender.com`. Verify it with
-`https://job-tracker-backend.onrender.com/health` → `{"status":"ok"}`.
+## 2. Environment variables
 
-> Note: the Render free plan sleeps the service after ~15 minutes of inactivity, so the first
-> request after idle can take ~30–50 seconds to wake up. This is fine for a demo.
+Add this in the Vercel project's **Environment Variables**:
 
-## 2. Frontend on Vercel
+- `DATABASE_URL` – your Neon connection string (the same one in `backend/.env`)
 
-1. Go to https://vercel.com → **Add New** → **Project** and import the same GitHub repo.
-2. Set **Root Directory** to `frontend` (since this is a monorepo).
-3. Add an environment variable:
-   - `NEXT_PUBLIC_API_URL` = your Render backend URL, e.g. `https://job-tracker-backend.onrender.com`
-4. Deploy. Vercel auto-detects Next.js and builds it.
+You do **not** need to set `NEXT_PUBLIC_BACKEND_URL` (Vercel injects it) or `CLIENT_URL` (no CORS in
+production since everything is one origin).
 
-> `NEXT_PUBLIC_API_URL` is read at build time, so if you change it later you must redeploy.
+## 3. Deploy
 
-## 3. Connect the two
+Deploy from the Vercel dashboard. Vercel builds each service separately:
 
-After both are live, make sure:
+- `backend` → installs deps (which runs `prisma generate` via the `postinstall` script), builds with
+  `tsc`, and runs the Express server. The build also applies migrations — make sure the build/start
+  picks up `prisma migrate deploy` (it's part of the backend scripts).
+- `frontend` → standard Next.js build.
 
-- Render's `CLIENT_URL` = your final Vercel domain (so CORS allows the frontend). Update it and
-  redeploy the backend if needed.
-- Vercel's `NEXT_PUBLIC_API_URL` = your final Render domain.
+Once deployed, check:
 
-Then open the Vercel URL and the app is live end-to-end.
+- `https://<your-app>.vercel.app/api/health` → `{"status":"ok"}`
+- `https://<your-app>.vercel.app/applications` → the app loads and lists data
+
+## Notes / gotchas
+
+- `experimentalServices` is **experimental** and gated behind a Vercel "Services" permission. If your
+  account doesn't have it, use the fallback below.
+- If Prisma complains about a missing query engine on Vercel, add the platform to `binaryTargets` in
+  `prisma/schema.prisma`, e.g. `binaryTargets = ["native", "debian-openssl-3.0.x"]`, and redeploy.
+- The route prefix is **not** stripped, so the backend mounts its routes under `/api` (already done in
+  `src/index.ts`).
+
+## Fallback: Vercel (frontend) + Render (backend)
+
+If the Services feature isn't available on your account, you can still deploy the classic way: frontend
+on Vercel, backend on Render. A `render.yaml` blueprint is included for that. In that setup the backend
+is reached cross-origin, so set `CLIENT_URL` on the backend and point the frontend's
+`NEXT_PUBLIC_API_URL` at the Render URL (`https://<service>.onrender.com/api`).

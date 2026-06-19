@@ -1,6 +1,11 @@
 import { Application, PaginatedApplications } from './types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+// On Vercel (services) NEXT_PUBLIC_BACKEND_URL is injected automatically as "/api".
+// Locally we fall back to the backend dev server, which also serves under /api.
+const API_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:4000/api';
 
 async function handleResponse(res: Response) {
   if (!res.ok) {
